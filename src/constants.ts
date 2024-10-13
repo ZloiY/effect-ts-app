@@ -1,0 +1,8 @@
+export const ERRORS = {
+  REQUEST_ERROR: 'REQUEST_ERROR',
+  NETWORK_ERROR: 'NETWORK_ERROR',
+  JSON_PARSE_ERROR: 'JSON_PARSE_ERROR',
+  ZOD_PARSE_ERROR: 'ZOD_PARSE_ERROR',
+} as const
+
+export const POKEMONS_URL = 'https://pokeapi.co/api/v2';
