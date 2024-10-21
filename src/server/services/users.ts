@@ -2,7 +2,7 @@ import knex from "knex";
 import crypto from 'crypto';
 import { generateSalt } from "../utils/salt-generator";
 import { ERRORS, MyServerError } from "../types";
-import { Effect, Either, flow, pipe } from "effect";
+import { Effect, pipe } from "effect";
 import { ExitMatchWrapper } from "../utils/exit-matcher";
 
 export type User = {
@@ -32,7 +32,7 @@ export class UserService {
           return Effect.tryPromise({
             try: () => db.transaction((trx) =>
               trx('users').insert({ name, salt, hash: hash.digest('base64') })
-                .then(trx.commit)
+                .then(trx.commit) as Promise<User[]>
             ),
             catch: (err: unknown) => ({ type: ERRORS.TRANSACTION_ERROR, message: `Transaction err ${err}` } as MyServerError)
           })
@@ -40,8 +40,7 @@ export class UserService {
 
         return Effect.fail({ type: ERRORS.USER_CREATION, message: "User already exist" } as MyServerError);
       }),
-      Effect.runPromiseExit,
-    ).then(ExitMatchWrapper)
+    )
   }
 
   static getUser(db: knex.Knex<User>, name: string) {
