@@ -1,15 +1,25 @@
 import knex from 'knex';
 import { ClientRequest, request } from 'http';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, beforeAll, describe, expect, it } from 'vitest';
 import { createUserTable, User, UserService } from '../services/users';
 import { userRoutesMiddleware } from './users';
 import { IncomingMessage, ServerResponse } from 'http';
 import { Effect } from 'effect';
-import { CreateUserPayload } from './users.schema';
+import { CreateUserPayload, UpdateUserPayload } from './users.schema';
+import HttpRequestMock from 'http-request-mock';
+import { await } from 'effect/Fiber';
 
 let db: knex.Knex<User>;
 
+const mocker = HttpRequestMock.setup();
+
 describe('/users routes integration tests', () => {
+  beforeAll(() => {
+    mocker.mock({
+      url: '127.0.0.1',
+      method: 'POST',
+    });
+  });
   beforeEach(async () => {
     db = knex({
       client: 'better-sqlite3',
@@ -50,7 +60,7 @@ describe('/users routes integration tests', () => {
     const res = {
       writeHead() { },
       write(payload: string) {
-        expect(JSON.parse(payload)[0].name).toBe('test1')
+        expect(JSON.parse(payload).name).toBe('test1')
       }
     } as unknown as ServerResponse;
     await Effect.runPromiseExit(UserService.createUser(db, 'test', 'test'));
@@ -70,6 +80,50 @@ describe('/users routes integration tests', () => {
       write(payload: string) {
         expect(JSON.parse(payload)[0].name).toBe('test')
       }
+    } as unknown as ServerResponse;
+    const result = await Effect.runPromise(userRoutesMiddleware(db, req as unknown as IncomingMessage, res));
+    expect('req' in result && 'res' in result).toBe(true);
+  });
+
+  it('should accept PUT request /users', async () => {
+    await Effect.runPromise(UserService.createUser(db, 'test', 'test'))
+    const req: ClientRequest & { headers?: { host: string } } = request({
+      method: 'PUT',
+    });
+    req.headers = { host: 'http://test' };
+    req.write(JSON.stringify({
+      oldUser: {
+        name: 'test',
+        pswd: 'test',
+      },
+      newUser: {
+        name: 'test2',
+        pswd: 'test2',
+      }
+    } as UpdateUserPayload))
+    const res = {
+      writeHead() { },
+      write(payload: string) {
+        expect(JSON.parse(payload).name).toEqual('test2');
+      }
+    } as unknown as ServerResponse;
+    const result = await Effect.runPromise(userRoutesMiddleware(db, req as unknown as IncomingMessage, res));
+    expect('req' in result && 'res' in result).toBe(true);
+  });
+
+  it('should accept DELETE requests for /users?name=', async () => {
+    await Effect.runPromise(UserService.createUser(db, 'test', 'test'))
+    const req = {
+      method: 'DELETE',
+      url: '/users?name=test',
+      headers: {
+        host: 'http://test'
+      },
+    } as IncomingMessage;
+    const res = {
+      writeHead(...args: any[]) {
+        expect(args[0]).toEqual(200);
+      },
     } as unknown as ServerResponse;
     const result = await Effect.runPromise(userRoutesMiddleware(db, req as unknown as IncomingMessage, res));
     expect('req' in result && 'res' in result).toBe(true);

@@ -3,8 +3,8 @@ import { match, P } from 'ts-pattern';
 import knex from 'knex';
 import { User, UserService } from '../services/users';
 import { Effect, pipe } from 'effect';
-import { ERRORS, MyServerError } from '../types';
-import { createUserPayloadSchema } from './users.schema';
+import { ERRORS } from '../types';
+import { CreateUserPayload, createUserPayloadSchema, upadateUserPayloadSchema, UpdateUserPayload } from './users.schema';
 
 export const userRoutesMiddleware = (db: knex.Knex<User>, req: http.IncomingMessage, res: http.ServerResponse<http.IncomingMessage> & { req: http.IncomingMessage }) => {
   return match({ req, method: req.method, url: new URL(req.url!, req.headers.host) })
@@ -58,18 +58,19 @@ export const userRoutesMiddleware = (db: knex.Knex<User>, req: http.IncomingMess
         });
         return pipe(
           Effect.tryPromise({
-            try: () => new Promise((resolve) => {
+            try: () => new Promise<CreateUserPayload>((resolve, reject) => {
               req.on('end', () => {
-                const userData = createUserPayloadSchema.parse(JSON.parse(data));
-                return pipe(
-                  UserService.createUser(db, userData.name, userData.password),
-                  Effect.runPromise,
-                  resolve
-                )
+                const userData = createUserPayloadSchema.safeParse(JSON.parse(data));
+                if (userData.success) {
+                  resolve(userData.data);
+                } else {
+                  reject({ type: ERRORS.PAYLOAD_PARSING, message: userData.error.format()._errors.join('\n') })
+                }
               })
             }),
-            catch: () => ({ type: ERRORS.DB_ERROR, message: 'Shouldn\'t be here' } as MyServerError)
+            catch: (err) => err,
           }),
+          Effect.flatMap((userData) => UserService.createUser(db, userData.name, userData.password)),
           Effect.map((user) => {
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.write(JSON.stringify(user))
@@ -77,8 +78,56 @@ export const userRoutesMiddleware = (db: knex.Knex<User>, req: http.IncomingMess
           })
         )
       })
+    .with({
+      method: 'PUT',
+      url: {
+        pathname: '/users',
+      }
+    }, ({ req }) => {
+      let data = '';
+      req.on('data', (chunk) => {
+        data += chunk;
+      });
+      return pipe(
+        Effect.tryPromise({
+          try: () => new Promise<UpdateUserPayload>((resolve, reject) => {
+            req.on('end', () => {
+              const userData = upadateUserPayloadSchema.safeParse(JSON.parse(data));
+              if (userData.success) {
+                resolve(userData.data);
+              } else {
+                reject({ type: ERRORS.PAYLOAD_PARSING, message: userData.error.format()._errors.join('\n') })
+              }
+            })
+          }),
+          catch: (err) => err,
+        }),
+        Effect.flatMap((update) => UserService.updateUser(db, update.oldUser, update.newUser)),
+        Effect.map((user) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.write(JSON.stringify(user))
+          return { req, res }
+        })
+      );
+    })
+    .with({
+      method: 'DELETE',
+      url: {
+        pathname: '/users',
+        searchParams: P.when((searchParams) => searchParams.has('name'))
+      }
+    }, ({ req, url }) => {
+        const name = url.searchParams.get('name')!;
+        return pipe(
+          UserService.deleteUser(db, name),
+          Effect.map(() => {
+            res.writeHead(200)
+            return { req, res };
+          })
+        );
+      })
     .otherwise(() => Effect.tryPromise({
       try: () => Promise.resolve({ req, res }),
-      catch: () => ({ type: ERRORS.DB_ERROR, message: 'Shouldn\'t be here' } as MyServerError)
+      catch: () => ({ type: ERRORS.DB_ERROR, message: 'Shouldn\'t be here' })
     }))
 }
