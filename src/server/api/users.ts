@@ -123,6 +123,10 @@ export const userRoutesMiddleware = (db: knex.Knex<User>, req: http.IncomingMess
           Effect.map(() => {
             res.writeHead(200)
             return { req, res };
+          }),
+          Effect.mapError((err) => {
+            res.writeHead(400);
+            return err;
           })
         );
       })

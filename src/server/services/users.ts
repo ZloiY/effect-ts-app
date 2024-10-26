@@ -26,13 +26,13 @@ export class UserService {
   static createUser(db: knex.Knex<User>, name: string, pswd: string) {
     return pipe(
       UserService.getUser(db, name),
-      Effect.match({
+      Effect.matchEffect({
         onFailure: (error) => match(error)
           .with({ type: ERRORS.DB_ERROR }, (error) => Effect.fail(error))
           .with({ type: ERRORS.USER_SEARCH }, () => Effect.succeed(undefined))
           .exhaustive()
         ,
-        onSuccess: () => Effect.fail({ type: ERRORS.USER_CREATION, message: "User already exist" } as MyServerError),
+        onSuccess: () => Effect.fail({ type: ERRORS.USER_CREATION, message: "User already exist" }),
       }),
       Effect.flatMap(() => {
         const salt = generateSalt();
@@ -40,10 +40,11 @@ export class UserService {
         hash.update(pswd + salt);
         return Effect.tryPromise({
           try: () => db.transaction((trx) =>
-            trx('users').insert({ name, salt, hash: hash.digest('base64') })
-              .then(trx.commit) as Promise<User[]>
-          ),
-          catch: (err: unknown) => ({ type: ERRORS.TRANSACTION_ERROR, message: `Transaction err ${err}` } as MyServerError)
+            trx('users')
+              .insert({ name, salt, hash: hash.digest('base64') })
+              .then(trx.commit)
+          ).then(() => ({ name } as User)),
+          catch: (err: unknown) => ({ type: ERRORS.TRANSACTION_ERROR, message: `Transaction err ${err}` })
         })
       }),
     )
@@ -57,7 +58,7 @@ export class UserService {
       }),
       Effect.filterOrFail(
         (users) => users.length > 0,
-        () => ({ type: ERRORS.USER_SEARCH, message: 'No such user' })
+        () => ({ type: ERRORS.USER_SEARCH, message: 'No such user' }),
       ),
       Effect.map((users) => users[0])
     );
@@ -96,7 +97,8 @@ export class UserService {
               name: newUser.name,
               salt,
               hash: hash.digest('base64')
-            }),
+            })
+            .then(() => ({ name: newUser.name } as User)),
           catch: (err: unknown) => ({ type: ERRORS.DB_ERROR, message: `DB error ${err}` })
         });
       })
